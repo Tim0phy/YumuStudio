@@ -99,8 +99,8 @@ void MainWindow::buildMenuBar() {
     auto *helpMenu = menuBar()->addMenu(tr("Help(&H)"));
     helpMenu->addAction(tr("About"), this, [this]{
         QMessageBox::about(this, tr("About Yumu Studio"),
-            tr("<b>Yumu Studio for Windows v8.7</b><br><br>"
-               "<b>What's New in v8.7:</b><br>"
+            tr("<b>Yumu Studio for Windows v0.1.8.7</b><br><br>"
+               "<b>What's New in v0.1.8.7:</b><br>"
                "• Google Gemini translation backend<br>"
                "• Ctrl+Wheel waveform zoom (1×–32×)<br>"
                "• Shift-all timecodes (⏱ button)<br>"
