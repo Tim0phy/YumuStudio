@@ -1,4 +1,4 @@
-# yumu_studio_win v0.1.8.7
+# yumu_studio
 
 > A Windows desktop application for audio/video processing and transcription, powered by whisper.cpp, FFmpeg, and Vulkan GPU acceleration.
 
