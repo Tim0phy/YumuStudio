@@ -94,14 +94,20 @@ The following issues are confirmed and currently being worked on. Contributions 
 
 | # | Type | Description | Status |
 |---|------|-------------|--------|
-| 1 | 🐛 Bug / UX | **Progress bar for video/audio playback is not user-friendly** — The seek bar lacks fine-grained control, does not display timestamps on hover, and may not update smoothly during long media files. | 🔧 In Progress |
-| 2 | 🚧 Missing Feature | **SRT subtitle burn-in not yet supported** — Currently, `.srt` subtitle files cannot be hardcoded (burned) into the output video. Exporting subtitles as a separate `.srt` file is supported, but muxing them as permanent overlays via FFmpeg's `subtitles` filter is not yet implemented. | 📋 Planned |
+| 1 | 🐛 Bug / UX | **Progress bar for video/audio playback is not user-friendly** — The seek bar lacks fine-grained control, does not display timestamps on hover, and may not update smoothly during long media files. | Fixed |
+| 2 | 🚧 Missing Feature | **SRT subtitle burn-in not yet supported** — Currently, `.srt` subtitle files cannot be hardcoded (burned) into the output video. Exporting subtitles as a separate `.srt` file is supported, but muxing them as permanent overlays via FFmpeg's `subtitles` filter is not yet implemented. | Added |
 
 > If you encounter other bugs or have feature requests, please [open an issue](../../issues/new).
 
 ---
 
 ## 📝 Changelog
+
+### v1 (2026-05-06)
+- Timeline time markers — Added timestamp indicators on the timeline, making it easier for users to navigate and adjust playback position accurately.
+- Fixed SRT hard-coding (burning) into output video — Resolved an issue where .srt subtitle files could not be properly hard-coded (embedded/burned) into the exported video.
+- Ollama local model translation support — The translation feature now supports connecting to a local Ollama instance, allowing users to perform subtitle translation using locally hosted LLM models without requiring an external API key.
+- Translation preview in the editor — A dedicated Translation column has been added to the subtitle editor interface, allowing users to preview translated text directly alongside the original subtitles.
 
 ### v0.1.8.7 (2026-05-02)
 - Updated whisper.cpp to latest upstream
