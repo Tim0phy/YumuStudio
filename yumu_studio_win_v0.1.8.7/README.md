@@ -1,10 +1,10 @@
-# Yumu Studio for Windows — v0.1.8.7
+# Yumu Studio for Windows
 
 A Windows C++/Qt6 subtitle editing tool.
 
 ---
 
-## v0.1.8.7
+##
 
 
 ---
