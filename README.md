@@ -1,6 +1,8 @@
 # Yumu Studio
+<div align="center">
+<img width="128" height="128" alt="icon" src="https://github.com/user-attachments/assets/c7aeac5a-0f45-4b61-840b-69b27fa1a8de" />
 
-> Windows 原生桌面子幕工作站 · Qt 6 · 本地 AI 語音轉文字 → 字幕編輯 → 匯出影片，一條龍完成
+> Windows 原生桌面字幕工作站 · Qt 6 · 本地 AI 語音轉文字 → 字幕編輯 → 匯出影片，一條龍完成
 
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-blue)](../../releases)
 [![Qt](https://img.shields.io/badge/Qt-6.7--6.11-green)](https://www.qt.io)
@@ -9,14 +11,13 @@
 
 Yumu Studio 是一套在 Windows 上運行的影音轉寫／字幕編輯／成品匯出工具。所有 AI 辨識與翻譯都在外部程序中執行，不綁定特定引擎，也不需要額外安裝 Python。只要進入「設定 → 引擎」安裝需要的後端，就能離線使用，字幕與模型都留在自己的電腦上。
 
-> [!NOTE]
-> 目前主線版本為 **v2.0.0**；`YumuStudio-main/` 是舊版快照。
+</div>
 
 ---
 
 ## 📦 下載與安裝
 
-前往 [Releases](../../releases) 下載對應版本。v2 同時提供**安裝檔**與**便攜包**，首次使用時才會下載引擎與模型。
+前往 [Releases](../../releases) 下載對應版本。v2 同時提供**安裝檔**與**便攜包**。
 
 ### 方法一：安裝檔（推薦）
 
@@ -115,7 +116,7 @@ cmake -B build -S . -DCMAKE_PREFIX_PATH="C:\Qt\6.11.0\msvc2022_64"
 cmake --build build --config Release --parallel
 ```
 
-輸出為 `build\Release\YumuStudio.exe`。詳見 [`docs/BUILD_FROM_SOURCE.md`](docs/BUILD_FROM_SOURCE.md)；製作便攜包見 [`docs/MAKE_PORTABLE.md`](docs/MAKE_PORTABLE.md)。
+
 
 ---
 
@@ -134,7 +135,7 @@ cmake --build build --config Release --parallel
 
 ## 📝 版本紀錄
 
-### v2.0.0（目前主線）
+### v2.0.0（2026-09-15）
 - 介面改為 Pastel 粉彩雙主題
 - 新增 Setup 安裝檔（`.exe`），同時保留便攜包（`.zip`）
 - 7 引擎 × 15 變體、硬體自動偵測與建議
