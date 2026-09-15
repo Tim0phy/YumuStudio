@@ -1,4 +1,5 @@
 #include "translationengine.h"
+#include "securitypolicy.h"
 #include <QThread>
 #include <QNetworkAccessManager>
 #include <QNetworkRequest>
@@ -9,6 +10,9 @@
 #include <QEventLoop>
 #include <QUrlQuery>
 #include <QUrl>
+#include <QRegularExpression>
+#include <QTimer>
+#include <QJsonParseError>
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Worker
@@ -27,6 +31,10 @@ signals:
 public slots:
     void run() {
         int total = entries.size();
+        if (total == 0) {
+            emit finished(true, {});
+            return;
+        }
         int batch = qMax(1, params.batchSize);
 
         for (int i = 0; i < total; i += batch) {
@@ -43,10 +51,6 @@ public slots:
 
             if (!err.isEmpty()) { emit finished(false, err); return; }
 
-            // Pad if needed
-            while (results.size() < texts.size())
-                results << texts[results.size()];
-
             emit batchTranslated(i, results);
         }
         emit progressChanged(100, "Translation complete");
@@ -55,6 +59,13 @@ public slots:
 
 private:
     QStringList translateBatch(const QStringList &texts, QString &outErr) {
+        if ((params.backend == TranslationBackend::OpenAI
+             || params.backend == TranslationBackend::Anthropic
+             || params.backend == TranslationBackend::Gemini)
+            && params.apiKey.trimmed().isEmpty()) {
+            outErr = "An API key is required for the selected translation service.";
+            return {};
+        }
         switch (params.backend) {
             case TranslationBackend::OpenAI:    return callOpenAI(texts, outErr);
             case TranslationBackend::Anthropic: return callAnthropic(texts, outErr);
@@ -73,16 +84,43 @@ private:
         QNetworkAccessManager nam;
         QNetworkRequest req(url);
         req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+        // SECURITY: reject HTTPS->HTTP downgrades and unexpected redirects.
+        req.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
+                         QNetworkRequest::UserVerifiedRedirectPolicy);
         for (auto it = headers.begin(); it != headers.end(); ++it)
             req.setRawHeader(it.key().toUtf8(), it.value().toUtf8());
 
         QEventLoop loop;
+        QTimer timeout;
+        timeout.setSingleShot(true);
+        bool timedOut = false;
         auto *reply = nam.post(req, body);
+        connect(reply, &QNetworkReply::redirected, &loop, [reply](const QUrl &target) {
+            if (!reply) return;
+            const QUrl targetUrl = reply->url().resolved(target);
+            if (SecurityPolicy::isAllowedRedirect(reply->url(), targetUrl))
+                reply->redirectAllowed();
+            else
+                reply->abort();
+        });
         connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+        connect(&timeout, &QTimer::timeout, &loop, [&] {
+            timedOut = true;
+            reply->abort();
+            loop.quit();
+        });
+        timeout.start(120000);
         loop.exec();
 
+        if (timedOut) {
+            outErr = "Network request timed out after 120 seconds.";
+            reply->deleteLater();
+            return {};
+        }
         if (reply->error() != QNetworkReply::NoError) {
-            outErr = reply->errorString() + "\n" + reply->readAll().left(400);
+            // SECURITY: do not echo response bodies that may contain secrets.
+            const QString sanitized = SecurityPolicy::redactSecrets(reply->errorString());
+            outErr = "Network request failed: " + sanitized;
             reply->deleteLater();
             return {};
         }
@@ -106,17 +144,21 @@ private:
                  }());
     }
 
-    QStringList parseNumberedLines(const QString &raw, int expected) {
+    QStringList parseNumberedLines(const QString &raw, int expected, QString &outErr) {
         QStringList result;
         static QRegularExpression re(R"(^\d+\.\s*(.+)$)");
         for (const QString &line : raw.split('\n')) {
             auto m = re.match(line.trimmed());
             if (m.hasMatch()) result << m.captured(1).trimmed();
         }
-        // fallback: just split by newlines if regex yields nothing
+        // Some providers omit the numbering even when instructed to keep it.
         if (result.isEmpty())
             result = raw.split('\n', Qt::SkipEmptyParts);
-        while (result.size() < expected) result << "—";
+        if (result.size() < expected) {
+            outErr = QString("Translation response contained %1 lines; expected %2.")
+                .arg(result.size()).arg(expected);
+            return {};
+        }
         return result.mid(0, expected);
     }
 
@@ -136,9 +178,21 @@ private:
             QJsonDocument(body).toJson(QJsonDocument::Compact), hdrs, outErr);
         if (!outErr.isEmpty()) return {};
 
-        auto doc = QJsonDocument::fromJson(resp);
-        QString raw = doc["choices"][0]["message"]["content"].toString();
-        return parseNumberedLines(raw, texts.size());
+        QJsonParseError parseError;
+        const auto doc = QJsonDocument::fromJson(resp, &parseError);
+        if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
+            outErr = "OpenAI returned invalid JSON.";
+            return {};
+        }
+        const auto choices = doc.object().value("choices").toArray();
+        if (choices.isEmpty() || !choices.first().isObject()) {
+            outErr = "OpenAI response did not contain a translation choice.";
+            return {};
+        }
+        const auto message = choices.first().toObject().value("message").toObject();
+        const QString raw = message.value("content").toString().trimmed();
+        if (raw.isEmpty()) { outErr = "OpenAI returned an empty translation."; return {}; }
+        return parseNumberedLines(raw, texts.size(), outErr);
     }
 
     // ── Anthropic ─────────────────────────────────────────────────────────────
@@ -159,9 +213,20 @@ private:
             QJsonDocument(body).toJson(QJsonDocument::Compact), hdrs, outErr);
         if (!outErr.isEmpty()) return {};
 
-        auto doc = QJsonDocument::fromJson(resp);
-        QString raw = doc["content"][0]["text"].toString();
-        return parseNumberedLines(raw, texts.size());
+        QJsonParseError parseError;
+        const auto doc = QJsonDocument::fromJson(resp, &parseError);
+        if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
+            outErr = "Anthropic returned invalid JSON.";
+            return {};
+        }
+        const auto content = doc.object().value("content").toArray();
+        if (content.isEmpty() || !content.first().isObject()) {
+            outErr = "Anthropic response did not contain translated content.";
+            return {};
+        }
+        const QString raw = content.first().toObject().value("text").toString().trimmed();
+        if (raw.isEmpty()) { outErr = "Anthropic returned an empty translation."; return {}; }
+        return parseNumberedLines(raw, texts.size(), outErr);
     }
 
     // ── Ollama ────────────────────────────────────────────────────────────────
@@ -171,28 +236,25 @@ private:
         body["prompt"] = buildPrompt(texts);
         body["stream"] = false;
 
-        QNetworkAccessManager nam;
-        QString base = params.ollamaUrl;
-        if (!base.endsWith('/')) base += '/';
-        QNetworkRequest req(QUrl(base + "api/generate"));
-        req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
-        req.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
-                         QNetworkRequest::ManualRedirectPolicy);
-
-        QEventLoop loop;
-        auto *reply = nam.post(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
-        connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
-        loop.exec();
-
-        if (reply->error() != QNetworkReply::NoError) {
-            outErr = reply->errorString();
-            reply->deleteLater();
+        QUrl base(params.ollamaUrl.trimmed());
+        if (!base.isValid() || (base.scheme() != "http" && base.scheme() != "https") || base.host().isEmpty()) {
+            outErr = "Ollama URL must be a valid http or https URL.";
             return {};
         }
-        auto doc = QJsonDocument::fromJson(reply->readAll());
-        reply->deleteLater();
-        QString raw = doc["response"].toString();
-        return parseNumberedLines(raw, texts.size());
+        QString path = base.path();
+        if (!path.endsWith('/')) path += '/';
+        base.setPath(path + "api/generate");
+        const QByteArray resp = postJson(base, QJsonDocument(body).toJson(QJsonDocument::Compact), {}, outErr);
+        if (!outErr.isEmpty()) return {};
+        QJsonParseError parseError;
+        const auto doc = QJsonDocument::fromJson(resp, &parseError);
+        if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
+            outErr = "Ollama returned invalid JSON.";
+            return {};
+        }
+        const QString raw = doc.object().value("response").toString().trimmed();
+        if (raw.isEmpty()) { outErr = "Ollama returned an empty translation."; return {}; }
+        return parseNumberedLines(raw, texts.size(), outErr);
     }
 
     // ── v8.7: Google Gemini ───────────────────────────────────────────────────
@@ -204,25 +266,38 @@ private:
         QJsonObject body;
         body["contents"] = QJsonArray{content};
 
-        QMap<QString,QString> hdrs;  // No extra headers needed; key goes in URL
+        QMap<QString,QString> hdrs;
+        hdrs["x-goog-api-key"] = params.apiKey;
 
         QString urlStr = QString(
-            "https://generativelanguage.googleapis.com/v1beta/models/%1:generateContent?key=%2")
-            .arg(params.geminiModel, params.apiKey);
+            "https://generativelanguage.googleapis.com/v1beta/models/%1:generateContent")
+            .arg(params.geminiModel);
 
         QByteArray resp = postJson(
             QUrl(urlStr),
             QJsonDocument(body).toJson(QJsonDocument::Compact), hdrs, outErr);
         if (!outErr.isEmpty()) return {};
 
-        auto doc = QJsonDocument::fromJson(resp);
-        // Gemini response path: candidates[0].content.parts[0].text
-        QString raw = doc["candidates"][0]["content"]["parts"][0]["text"].toString();
-        if (raw.isEmpty()) {
-            outErr = "Gemini returned empty response: " + QString::fromUtf8(resp).left(400);
+        QJsonParseError parseError;
+        const auto doc = QJsonDocument::fromJson(resp, &parseError);
+        if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
+            outErr = "Gemini returned invalid JSON.";
             return {};
         }
-        return parseNumberedLines(raw, texts.size());
+        const auto candidates = doc.object().value("candidates").toArray();
+        QString raw;
+        if (!candidates.isEmpty()) {
+            const QJsonObject candidate = candidates.first().toObject();
+            const QJsonObject content = candidate.value("content").toObject();
+            const QJsonArray parts = content.value("parts").toArray();
+            if (!parts.isEmpty())
+                raw = parts.at(0).toObject().value("text").toString().trimmed();
+        }
+        if (raw.isEmpty()) {
+            outErr = "Gemini returned empty response.";
+            return {};
+        }
+        return parseNumberedLines(raw, texts.size(), outErr);
     }
 };
 
@@ -233,7 +308,13 @@ private:
 // ─────────────────────────────────────────────────────────────────────────────
 TranslationEngine::TranslationEngine(QObject *parent) : QObject(parent) {}
 TranslationEngine::~TranslationEngine() {
-    if (m_thread) { m_thread->quit(); m_thread->wait(); }
+    if (m_thread) {
+        m_thread->requestInterruption();
+        m_thread->quit();
+        m_thread->wait();
+        m_thread = nullptr;
+        m_worker = nullptr;
+    }
 }
 
 void TranslationEngine::translate(const QList<SubtitleEntry> &entries,
@@ -251,7 +332,9 @@ void TranslationEngine::translate(const QList<SubtitleEntry> &entries,
     connect(m_worker, &TranslationWorker::progressChanged, this, &TranslationEngine::progressChanged);
     connect(m_worker, &TranslationWorker::batchTranslated, this, &TranslationEngine::batchTranslated);
     connect(m_worker, &TranslationWorker::finished, this, [this](bool ok, const QString &err){
-        m_busy = false; m_thread->quit(); emit finished(ok, err);
+        m_busy = false;
+        if (m_thread) m_thread->quit();
+        emit finished(ok, err);
     });
     connect(m_thread, &QThread::finished, m_worker, &QObject::deleteLater);
     connect(m_thread, &QThread::finished, m_thread, &QObject::deleteLater);

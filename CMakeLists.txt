@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(YumuStudio VERSION 8.7.0 LANGUAGES CXX)
+project(YumuStudio VERSION 2.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -7,94 +7,55 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
+# whisper.cpp is no longer required at build time. Backends (whisper.cpp CLI,
+# Python engines) are fetched or compiled on the user's machine at runtime from
+# the in-app Engine Center.
+set(YUMU_HAS_VULKAN 0)
+set(YUMU_HAS_CUDA 0)
+
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Multimedia MultimediaWidgets Network)
 
 file(GLOB SRC_FILES "src/*.cpp" "src/*.h")
-add_executable(YumuStudio WIN32 ${SRC_FILES})
+add_executable(YumuStudio WIN32 ${SRC_FILES} src/resources.qrc)
+if(WIN32)
+    target_sources(YumuStudio PRIVATE src/app.rc)
+endif()
 
 target_link_libraries(YumuStudio PRIVATE
     Qt6::Core Qt6::Gui Qt6::Widgets
     Qt6::Multimedia Qt6::MultimediaWidgets Qt6::Network
 )
 
-# ── whisper.cpp（可選）────────────────────────────────────────────────────────
-if(DEFINED WHISPER_ROOT)
-    message(STATUS "[YumuStudio] WHISPER_ROOT = ${WHISPER_ROOT}")
-
-    # 頭文件
-    foreach(inc
-        "${WHISPER_ROOT}/include"
-        "${WHISPER_ROOT}/ggml/include"
-        "${WHISPER_ROOT}/build/include"
-        "${WHISPER_ROOT}/build/src"
-        "${WHISPER_ROOT}/build/ggml/src"
-    )
-        if(EXISTS "${inc}") 
-            target_include_directories(YumuStudio PRIVATE "${inc}")
-        endif()
-    endforeach()
-
-    # 掃描所有可能的 lib 路徑（包含 install/lib 目錄）
-    file(GLOB_RECURSE ALL_WHISPER_LIBS
-        "${WHISPER_ROOT}/build/src/Release/*.lib"
-        "${WHISPER_ROOT}/build/ggml/src/Release/*.lib"
-        "${WHISPER_ROOT}/build/Release/*.lib"
-        "${WHISPER_ROOT}/lib/Release/*.lib"
-        "${WHISPER_ROOT}/lib/*.lib"
-    )
-
-    # 分類
-    set(VULKAN_LIBS  "")
-    set(OTHER_LIBS   "")
-    foreach(L ${ALL_WHISPER_LIBS})
-        string(TOLOWER "${L}" LL)
-        if(LL MATCHES "vulkan")
-            list(APPEND VULKAN_LIBS "${L}")
-            message(STATUS "[YumuStudio]  vulkan-lib: ${L}")
-        else()
-            list(APPEND OTHER_LIBS "${L}")
-            message(STATUS "[YumuStudio]  + ${L}")
-        endif()
-    endforeach()
-
-    target_link_libraries(YumuStudio PRIVATE ${OTHER_LIBS})
-    target_compile_definitions(YumuStudio PRIVATE HAVE_WHISPER_LIB)
-
-    # ── Vulkan 處理 ───────────────────────────────────────────────────────────
-    # ggml.lib 只要是用 GGML_VULKAN=ON 編譯的，就必須連結 Vulkan SDK
-    # 即使沒有獨立的 ggml-vulkan.lib，ggml.lib 內部仍有 Vulkan 符號
-    find_package(Vulkan QUIET)
-    if(Vulkan_FOUND)
-        message(STATUS "[YumuStudio] ✅ Vulkan SDK: ${Vulkan_INCLUDE_DIRS}")
-        target_include_directories(YumuStudio PRIVATE ${Vulkan_INCLUDE_DIRS})
-        target_link_libraries(YumuStudio PRIVATE Vulkan::Vulkan)
-        if(VULKAN_LIBS)
-            target_link_libraries(YumuStudio PRIVATE ${VULKAN_LIBS})
-        endif()
-        message(STATUS "[YumuStudio] ✅ GPU: Vulkan enabled")
-    else()
-        if(VULKAN_LIBS OR TRUE)   # TRUE = always check, ggml.lib may embed vulkan
-            message(FATAL_ERROR
-                "[YumuStudio] ❌ Vulkan SDK not found!\n"
-                "Your whisper.cpp ggml.lib was compiled with Vulkan support.\n"
-                "You MUST install Vulkan SDK to link YumuStudio.\n"
-                "Download: https://vulkan.lunarg.com/sdk/home#windows\n"
-                "After install: delete build/ and re-run cmake (no recompile needed).")
-        endif()
-    endif()
-
-    # ── CUDA（可選）──────────────────────────────────────────────────────────
-    find_package(CUDAToolkit QUIET)
-    if(CUDAToolkit_FOUND)
-        target_link_libraries(YumuStudio PRIVATE CUDA::cudart_static CUDA::cublas)
-        message(STATUS "[YumuStudio] ✅ CUDA also available")
-    endif()
-endif()
-
 if(MSVC)
-    target_compile_options(YumuStudio PRIVATE /utf-8 /W3 /wd4996)
+    # /Zc:__cplusplus reports the true C++ standard level (otherwise MSVC keeps
+    # __cplusplus == 199711L), which Qt's qcompilerdetection.h requires for C++17.
+    target_compile_options(YumuStudio PRIVATE /Zc:__cplusplus /utf-8 /W3 /wd4996)
     target_compile_definitions(YumuStudio PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
 endif()
 
-target_compile_definitions(YumuStudio PRIVATE APP_VERSION="8.7.0" APP_NAME="Yumu Studio")
+target_compile_definitions(YumuStudio PRIVATE
+    APP_VERSION="2.0.0"
+    APP_NAME="Yumu Studio"
+)
 install(TARGETS YumuStudio RUNTIME DESTINATION bin)
+install(FILES "${CMAKE_SOURCE_DIR}/scripts/local_asr_runner.py" DESTINATION bin/scripts)
+
+# ── Optional developer self-test harness (not built by default) ─────────────
+option(YUMU_BUILD_SELFTEST "Build the sandbox download self-test tool" OFF)
+if(YUMU_BUILD_SELFTEST AND EXISTS "${CMAKE_SOURCE_DIR}/tests/yumu_selftest.cpp")
+    add_executable(yumu_selftest tests/yumu_selftest.cpp
+        src/appconfig.cpp src/backendcatalog.cpp src/backendinstaller.cpp
+        src/localmodelmanager.cpp src/hardwareprobe.cpp
+        src/subtitlerefiner.cpp src/glossary.cpp src/subtitlemodel.cpp src/ffmpegexporter.cpp
+        src/videopreview.cpp src/uitheme.cpp src/stylepreviewwidget.cpp
+        src/subtitlestylecard.cpp src/subtitlecorrectionengine.cpp src/learnedterms.cpp
+        src/appupdatechecker.cpp)
+    target_include_directories(yumu_selftest PRIVATE src)
+    target_link_libraries(yumu_selftest PRIVATE
+        Qt6::Core Qt6::Gui Qt6::Network Qt6::Widgets
+        Qt6::Multimedia Qt6::MultimediaWidgets)
+    target_compile_definitions(yumu_selftest PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN YUMU_SELFTEST_PROBE)
+    if(MSVC)
+        target_compile_options(yumu_selftest PRIVATE /Zc:__cplusplus /utf-8 /W3 /wd4996)
+    endif()
+endif()

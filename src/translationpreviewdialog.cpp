@@ -24,7 +24,8 @@ TranslationPreviewDialog::TranslationPreviewDialog(const QList<SubtitleEntry> &e
 
 void TranslationPreviewDialog::buildUI() {
     auto *root = new QVBoxLayout(this);
-    root->setContentsMargins(5, 5, 5, 5);
+    root->setContentsMargins(12, 12, 12, 12);
+    root->setSpacing(10);
 
     m_table = new QTableWidget(this);
     m_table->setColumnCount(3);
@@ -47,10 +48,14 @@ void TranslationPreviewDialog::buildUI() {
     btnRow->addStretch();
 
     auto *exportBtn = new QPushButton(tr("Export Translation SRT"), this);
+    exportBtn->setObjectName("yumuBtn");
+    exportBtn->setCursor(Qt::PointingHandCursor);
     connect(exportBtn, &QPushButton::clicked, this, &TranslationPreviewDialog::onExportClicked);
     btnRow->addWidget(exportBtn);
 
     auto *closeBtn = new QPushButton(tr("Close"), this);
+    closeBtn->setObjectName("yumuBtnSecondary");
+    closeBtn->setCursor(Qt::PointingHandCursor);
     closeBtn->setDefault(true);
     connect(closeBtn, &QPushButton::clicked, this, [this](){
         saveChanges();

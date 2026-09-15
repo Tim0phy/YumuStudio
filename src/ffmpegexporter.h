@@ -1,5 +1,6 @@
 #pragma once
 #include <QObject>
+#include <QPointer>
 #include <QString>
 #include <QList>
 #include "subtitlemodel.h"
@@ -11,6 +12,7 @@ struct ExportParams {
     bool          burnSubtitles = true;
     bool          bilingualBurn = false;
     bool          srtOnly       = false;
+    bool          transparentProres = false; // 透明字幕影片 (ProRes 4444)
     QString       videoCodec    = "libx264";
     int           crf           = 23;
     QString       preset        = "fast";
@@ -36,6 +38,6 @@ signals:
 
 private:
     ExportWorker *m_worker = nullptr;
-    QThread      *m_thread = nullptr;
+    QPointer<QThread> m_thread;
     bool          m_busy   = false;
 };

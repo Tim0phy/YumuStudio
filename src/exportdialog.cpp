@@ -1,5 +1,4 @@
 #include "exportdialog.h"
-#include "stylepreviewwidget.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QFormLayout>
@@ -10,8 +9,6 @@
 #include <QSpinBox>
 #include <QLabel>
 #include <QPushButton>
-#include <QColorDialog>
-#include <QFontDialog>
 #include <QDialogButtonBox>
 
 ExportDialog::ExportDialog(SubtitleStyle defaultStyle, QWidget *parent)
@@ -53,75 +50,8 @@ void ExportDialog::buildUI() {
     vidForm->addRow(tr("Audio bitrate:"), m_audioBrSpin);
     root->addWidget(vidGroup);
 
-    // ── Subtitle style ────────────────────────────────────────────────────────
-    auto *styleGroup = new QGroupBox(tr("Subtitle Style"));
-    auto *styleForm  = new QFormLayout(styleGroup);
-
-    m_fontLabel   = new QLabel(m_style.fontFamily);
-    auto *fontBtn = new QPushButton(tr("Choose Font..."));
-    fontBtn->setFixedWidth(110);
-    auto *fontRow = new QHBoxLayout;
-    fontRow->addWidget(m_fontLabel, 1); fontRow->addWidget(fontBtn);
-    auto *fontW   = new QWidget; fontW->setLayout(fontRow);
-
-    m_fontSizeSpin     = new QSpinBox; m_fontSizeSpin->setRange(12,120); m_fontSizeSpin->setValue(m_style.fontSize);
-    m_outlineWidthSpin = new QSpinBox; m_outlineWidthSpin->setRange(0,8); m_outlineWidthSpin->setValue(m_style.outlineWidth);
-    m_boldCb   = new QCheckBox; m_boldCb->setChecked(m_style.bold);
-    m_italicCb = new QCheckBox; m_italicCb->setChecked(m_style.italic);
-    m_bgCb     = new QCheckBox(tr("Show background box")); m_bgCb->setChecked(m_style.showBg);
-    m_positionCombo = new QComboBox;
-    m_positionCombo->addItems({tr("Bottom center"), tr("Top center"), tr("Center")});
-    m_positionCombo->setCurrentIndex(m_style.position);
-
-    // Color buttons — use lambda, no extra slots needed
-    auto makeColorBtn = [this](QColor &ref) -> QPushButton* {
-        auto *btn = new QPushButton(this);
-        btn->setFixedSize(64, 24);
-        auto refresh = [btn, &ref]() {
-            btn->setStyleSheet(QString("background:%1;border:1px solid #666;border-radius:3px;").arg(ref.name()));
-        };
-        refresh();
-        connect(btn, &QPushButton::clicked, this, [this, btn, &ref, refresh]() mutable {
-            QColor c = QColorDialog::getColor(ref, btn, tr("Choose Color"), QColorDialog::ShowAlphaChannel);
-            if (c.isValid()) { ref = c; refresh(); updatePreview(); }
-        });
-        return btn;
-    };
-
-    m_textColorBtn    = makeColorBtn(m_style.textColor);
-    m_outlineColorBtn = makeColorBtn(m_style.outlineColor);
-
-    styleForm->addRow(tr("Font:"),          fontW);
-    styleForm->addRow(tr("Font size:"),     m_fontSizeSpin);
-    styleForm->addRow(tr("Text color:"),    m_textColorBtn);
-    styleForm->addRow(tr("Outline color:"), m_outlineColorBtn);
-    styleForm->addRow(tr("Outline width:"), m_outlineWidthSpin);
-    styleForm->addRow(tr("Bold:"),          m_boldCb);
-    styleForm->addRow(tr("Italic:"),        m_italicCb);
-    styleForm->addRow(tr("Position:"),      m_positionCombo);
-    styleForm->addRow(QString{},            m_bgCb);
-    root->addWidget(styleGroup);
-
-    // ── Live Preview ──────────────────────────────────────────────────────────
-    auto *previewGroup = new QGroupBox(tr("Live Preview"));
-    auto *pvLayout     = new QVBoxLayout(previewGroup);
-    m_preview = new StylePreviewWidget(this);
-    m_preview->setStyle(m_style);
-    pvLayout->addWidget(m_preview);
-    root->addWidget(previewGroup);
-
     // ── Connections ───────────────────────────────────────────────────────────
-    connect(fontBtn,            &QPushButton::clicked,                              this, &ExportDialog::chooseFont);
-    connect(m_fontSizeSpin,     QOverload<int>::of(&QSpinBox::valueChanged),        this, &ExportDialog::updatePreview);
-    connect(m_outlineWidthSpin, QOverload<int>::of(&QSpinBox::valueChanged),        this, &ExportDialog::updatePreview);
-    connect(m_boldCb,           &QCheckBox::toggled,                               this, &ExportDialog::updatePreview);
-    connect(m_italicCb,         &QCheckBox::toggled,                               this, &ExportDialog::updatePreview);
-    connect(m_bgCb,             &QCheckBox::toggled,                               this, &ExportDialog::updatePreview);
-    connect(m_positionCombo,    QOverload<int>::of(&QComboBox::currentIndexChanged),this, &ExportDialog::updatePreview);
-    connect(m_bilingualCb,      &QCheckBox::toggled,                               this, &ExportDialog::updatePreview);
-    connect(m_srtRadio,         &QRadioButton::toggled, vidGroup,    &QGroupBox::setDisabled);
-    connect(m_srtRadio,         &QRadioButton::toggled, styleGroup,  &QGroupBox::setDisabled);
-    connect(m_srtRadio,         &QRadioButton::toggled, previewGroup,&QGroupBox::setDisabled);
+    connect(m_srtRadio,         &QRadioButton::toggled, vidGroup,   &QGroupBox::setDisabled);
     connect(m_srtRadio,         &QRadioButton::toggled, this, [this](bool checked) {
         if (checked) m_bilingualCb->setChecked(true);
     });
@@ -130,6 +60,8 @@ void ExportDialog::buildUI() {
     // ── Buttons ───────────────────────────────────────────────────────────────
     auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     bb->button(QDialogButtonBox::Ok)->setText(tr("Start Export"));
+    bb->button(QDialogButtonBox::Ok)->setObjectName("yumuBtn");
+    bb->button(QDialogButtonBox::Cancel)->setObjectName("yumuBtnSecondary");
     root->addWidget(bb);
 
     connect(bb, &QDialogButtonBox::accepted, this, [this](){
@@ -141,38 +73,10 @@ void ExportDialog::buildUI() {
         m_result.crf           = m_crfSpin->value();
         m_result.preset        = m_presetCombo->currentText();
         m_result.audioBitrate  = m_audioBrSpin->value();
-        m_style.fontSize       = m_fontSizeSpin->value();
-        m_style.outlineWidth   = m_outlineWidthSpin->value();
-        m_style.bold           = m_boldCb->isChecked();
-        m_style.italic         = m_italicCb->isChecked();
-        m_style.showBg         = m_bgCb->isChecked();
-        m_style.position       = m_positionCombo->currentIndex();
+        // Subtitle style is configured in the main-window style studio; the
+        // export dialog never edits it, so the model style passes through.
         m_result.style         = m_style;
         accept();
     });
     connect(bb, &QDialogButtonBox::rejected, this, &QDialog::reject);
-}
-
-void ExportDialog::chooseFont() {
-    bool ok;
-    QFont f(m_style.fontFamily, m_style.fontSize);
-    QFont chosen = QFontDialog::getFont(&ok, f, this, tr("Choose Font"));
-    if (ok) {
-        m_style.fontFamily = chosen.family();
-        m_style.fontSize   = chosen.pointSize();
-        m_fontLabel->setText(chosen.family());
-        m_fontSizeSpin->setValue(chosen.pointSize());
-        updatePreview();
-    }
-}
-
-void ExportDialog::updatePreview() {
-    m_style.fontSize         = m_fontSizeSpin->value();
-    m_style.outlineWidth     = m_outlineWidthSpin->value();
-    m_style.bold             = m_boldCb->isChecked();
-    m_style.italic           = m_italicCb->isChecked();
-    m_style.showBg           = m_bgCb->isChecked();
-    m_style.position         = m_positionCombo->currentIndex();
-    m_style.bilingualEnabled = m_bilingualCb->isChecked();
-    m_preview->setStyle(m_style);
 }
