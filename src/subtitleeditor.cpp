@@ -1,14 +1,16 @@
 #include "subtitleeditor.h"
+#include "appconfig.h"
+#include "learnedterms.h"
 #include <QVBoxLayout>
+#include <QHBoxLayout>
 #include <QHeaderView>
-#include <QAction>
+#include <QPushButton>
 #include <QInputDialog>
 #include <QMessageBox>
 #include <QShortcut>
 #include <QRegularExpression>
 #include <algorithm>
 
-// ── 成員函數實現（修復 LNK2019）────────────────────────────────────────────────
 QString SubtitleEditor::msToDisplay(qint64 ms) {
     int h=int(ms/3600000); ms%=3600000;
     int m=int(ms/60000);   ms%=60000;
@@ -18,7 +20,6 @@ QString SubtitleEditor::msToDisplay(qint64 ms) {
 }
 
 qint64 SubtitleEditor::displayToMs(const QString &str) {
-    // h:mm:ss.mmm  or  mm:ss.mmm
     QString s = str.trimmed();
     auto parts = s.split(':');
     if (parts.size() == 3) {
@@ -42,59 +43,87 @@ SubtitleEditor::SubtitleEditor(QWidget *parent) : QWidget(parent) {
 
 void SubtitleEditor::buildUI() {
     auto *root = new QVBoxLayout(this);
-    root->setContentsMargins(0,0,0,0);
-    root->setSpacing(2);
+    root->setContentsMargins(0, 0, 0, 0);
+    root->setSpacing(8);
 
-    m_toolbar = new QToolBar;
-    m_toolbar->setIconSize({14,14});
-    m_toolbar->setStyleSheet("QToolBar { spacing:2px; }");
+    // Compact inline button bar replacing old text-action toolbar
+    auto *btnBar = new QHBoxLayout;
+    btnBar->setContentsMargins(0, 0, 0, 0);
+    btnBar->setSpacing(4);
 
-    auto *addAct    = m_toolbar->addAction(tr("+ Add"));
-    auto *delAct    = m_toolbar->addAction(tr("X Delete"));
-    m_toolbar->addSeparator();
-    auto *splitAct  = m_toolbar->addAction(tr("| Split"));
-    auto *mergeAct  = m_toolbar->addAction(tr("<< Merge"));
-    m_toolbar->addSeparator();
-    auto *upAct     = m_toolbar->addAction(tr("^ Up"));
-    auto *downAct   = m_toolbar->addAction(tr("v Down"));
-    m_toolbar->addSeparator();
-    auto *shiftAct  = m_toolbar->addAction(tr("T Shift"));
-    m_toolbar->addSeparator();
-    auto *searchAct = m_toolbar->addAction(tr("Search"));
-    auto *replaceAct= m_toolbar->addAction(tr("Replace"));
+    // Editorial ledger toolbar — small mono caps, hairline micro buttons
+    auto mkBtn = [&](const QString &text, const QString &tip) -> QPushButton* {
+        auto *b = new QPushButton(text);
+        b->setObjectName("microBtn");
+        b->setFlat(true);
+        b->setToolTip(tip);
+        b->setFixedHeight(24);
+        b->setCursor(Qt::PointingHandCursor);
+        return b;
+    };
 
-    addAct->setToolTip(tr("Add subtitle (Ins)"));
-    delAct->setToolTip(tr("Delete selected (Del)"));
-    splitAct->setToolTip(tr("Split at midpoint"));
-    mergeAct->setToolTip(tr("Merge selected rows"));
-    upAct->setToolTip(tr("Move up"));
-    downAct->setToolTip(tr("Move down"));
-    shiftAct->setToolTip(tr("Shift all timecodes by offset (ms)"));
-    searchAct->setToolTip(tr("Search text (Ctrl+F)"));
-    replaceAct->setToolTip(tr("Find & Replace (Ctrl+H)"));
+    auto *addBtn    = mkBtn(tr("＋ ADD"),    tr("Add subtitle (Ins)"));
+    auto *delBtn    = mkBtn(tr("— DEL"), tr("Delete selected (Del)"));
+    auto *splitBtn  = mkBtn(tr("SPLIT"),  tr("Split at midpoint"));
+    auto *mergeBtn  = mkBtn(tr("MERGE"),  tr("Merge selected rows"));
+    auto *upBtn     = mkBtn(tr("↑ UP"),     tr("Move up"));
+    auto *downBtn   = mkBtn(tr("↓ DOWN"),   tr("Move down"));
+    auto *shiftBtn  = mkBtn(tr("SHIFT"),  tr("Shift all timecodes by offset"));
+    auto *searchBtn = mkBtn(tr("SEARCH"), tr("Search text (Ctrl+F)"));
+    auto *replaceBtn= mkBtn(tr("REPLACE"),tr("Find & Replace (Ctrl+H)"));
+    auto *correctBtn= mkBtn(tr("AI 校正"), tr("AI subtitle correction"));
 
-    connect(addAct,    &QAction::triggered, this, &SubtitleEditor::onAdd);
-    connect(delAct,    &QAction::triggered, this, &SubtitleEditor::onDelete);
-    connect(splitAct,  &QAction::triggered, this, &SubtitleEditor::onSplit);
-    connect(mergeAct,  &QAction::triggered, this, &SubtitleEditor::onMerge);
-    connect(upAct,     &QAction::triggered, this, &SubtitleEditor::onMoveUp);
-    connect(downAct,   &QAction::triggered, this, &SubtitleEditor::onMoveDown);
-    connect(shiftAct,  &QAction::triggered, this, &SubtitleEditor::onShiftAll);
-    connect(searchAct, &QAction::triggered, this, &SubtitleEditor::onSearch);
-    connect(replaceAct,&QAction::triggered, this, &SubtitleEditor::onReplace);
-    root->addWidget(m_toolbar);
+    m_addBtn = addBtn; m_delBtn = delBtn; m_splitBtn = splitBtn; m_mergeBtn = mergeBtn;
+    m_upBtn = upBtn; m_downBtn = downBtn; m_shiftBtn = shiftBtn;
+    m_searchBtn = searchBtn; m_replaceBtn = replaceBtn; m_correctBtn = correctBtn;
 
+    btnBar->addWidget(addBtn);
+    btnBar->addWidget(delBtn);
+    btnBar->addSpacing(8);
+    btnBar->addWidget(splitBtn);
+    btnBar->addWidget(mergeBtn);
+    btnBar->addSpacing(8);
+    btnBar->addWidget(upBtn);
+    btnBar->addWidget(downBtn);
+    btnBar->addSpacing(8);
+    btnBar->addWidget(shiftBtn);
+    btnBar->addSpacing(12);
+    btnBar->addStretch();
+    btnBar->addWidget(searchBtn);
+    btnBar->addWidget(replaceBtn);
+    btnBar->addWidget(correctBtn);
+
+    connect(addBtn,    &QPushButton::clicked, this, &SubtitleEditor::onAdd);
+    connect(delBtn,    &QPushButton::clicked, this, &SubtitleEditor::onDelete);
+    connect(splitBtn,  &QPushButton::clicked, this, &SubtitleEditor::onSplit);
+    connect(mergeBtn,  &QPushButton::clicked, this, &SubtitleEditor::onMerge);
+    connect(upBtn,     &QPushButton::clicked, this, &SubtitleEditor::onMoveUp);
+    connect(downBtn,   &QPushButton::clicked, this, &SubtitleEditor::onMoveDown);
+    connect(shiftBtn,  &QPushButton::clicked, this, &SubtitleEditor::onShiftAll);
+    connect(searchBtn, &QPushButton::clicked, this, &SubtitleEditor::onSearch);
+    connect(replaceBtn,&QPushButton::clicked, this, &SubtitleEditor::onReplace);
+    connect(correctBtn,&QPushButton::clicked, this, &SubtitleEditor::onCorrect);
+    root->addLayout(btnBar);
+
+    // Magazine ledger table — # folio, mono timecodes, body serif
     m_table = new QTableWidget(this);
     m_table->setColumnCount(5);
-    m_table->setHorizontalHeaderLabels({tr("#"), tr("Start"), tr("End"), tr("Text"), tr("Translation")});
-    m_table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
-    m_table->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
-    m_table->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
-    m_table->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Stretch);
-    m_table->horizontalHeader()->setSectionResizeMode(4, QHeaderView::Stretch);
+    m_table->setHorizontalHeaderLabels({tr("№"), tr("IN —"), tr("OUT —"), tr("TEXT"), tr("TRANSLATION")});
+    auto *hh = m_table->horizontalHeader();
+    hh->setSectionResizeMode(0, QHeaderView::Fixed);
+    hh->setDefaultSectionSize(44);
+    hh->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    hh->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    hh->setSectionResizeMode(3, QHeaderView::Stretch);
+    hh->setSectionResizeMode(4, QHeaderView::Stretch);
+    hh->setDefaultAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
-    m_table->setAlternatingRowColors(true);
+    m_table->setAlternatingRowColors(true); // ivory ledger stripes via QSS
     m_table->setEditTriggers(QAbstractItemView::DoubleClicked | QAbstractItemView::SelectedClicked);
+    m_table->setFrameShape(QFrame::NoFrame);
+    m_table->setShowGrid(false);
+    m_table->verticalHeader()->setVisible(false);
+    m_table->verticalHeader()->setDefaultSectionSize(36); // library manuscript ledger
     root->addWidget(m_table, 1);
 
     auto *delShortcut = new QShortcut(Qt::Key_Delete, m_table);
@@ -111,6 +140,25 @@ void SubtitleEditor::buildUI() {
             this, &SubtitleEditor::onCellChanged);
     connect(m_table, &QTableWidget::cellDoubleClicked,
             this, &SubtitleEditor::onCellDoubleClicked);
+    connect(m_table, &QTableWidget::itemSelectionChanged, this, [this] {
+        if (!m_updating)
+            emit selectionChanged(m_table->currentRow());
+    });
+}
+
+void SubtitleEditor::retranslateUi() {
+    if (!m_table) return;
+    m_addBtn->setText(tr("＋ ADD"));       m_addBtn->setToolTip(tr("Add subtitle (Ins)"));
+    m_delBtn->setText(tr("— DEL"));    m_delBtn->setToolTip(tr("Delete selected (Del)"));
+    m_splitBtn->setText(tr("SPLIT"));   m_splitBtn->setToolTip(tr("Split at midpoint"));
+    m_mergeBtn->setText(tr("MERGE"));   m_mergeBtn->setToolTip(tr("Merge selected rows"));
+    m_upBtn->setText(tr("↑ UP"));         m_upBtn->setToolTip(tr("Move up"));
+    m_downBtn->setText(tr("↓ DOWN"));     m_downBtn->setToolTip(tr("Move down"));
+    m_shiftBtn->setText(tr("SHIFT"));   m_shiftBtn->setToolTip(tr("Shift all timecodes by offset"));
+    m_searchBtn->setText(tr("SEARCH")); m_searchBtn->setToolTip(tr("Search text (Ctrl+F)"));
+    m_replaceBtn->setText(tr("REPLACE")); m_replaceBtn->setToolTip(tr("Find & Replace (Ctrl+H)"));
+    m_correctBtn->setText(tr("AI 校正")); m_correctBtn->setToolTip(tr("AI subtitle correction"));
+    m_table->setHorizontalHeaderLabels({tr("№"), tr("IN —"), tr("OUT —"), tr("TEXT"), tr("TRANSLATION")});
 }
 
 void SubtitleEditor::setModel(SubtitleModel *model) {
@@ -142,26 +190,72 @@ void SubtitleEditor::refreshTable() {
 
 void SubtitleEditor::highlightAtMs(qint64 posMs) {
     if (!m_model) return;
+    // 節流：與 previewFpsCap 同步，避免 4K 60fps 下每 tick 觸發 O(n) 掃描與選行導致 UI 掉幀
+    {
+        int fps = qBound(10, AppConfig::instance().preview.previewFpsCap, 60);
+        int gate = qMax(40, 1000 / fps);
+        if (m_highlightGate.isValid() && m_highlightGate.elapsed() < gate) {
+            const int cur = m_table->currentRow();
+            if (cur >= 0 && cur < m_model->rowCount()) {
+                const auto &c = m_model->entryAt(cur);
+                if (posMs >= c.startMs && posMs <= c.endMs) return;
+            }
+            // 門限內且已離開當前字幕段，跳過本次掃描以保流暢（最多延遲 gate ms）
+            return;
+        }
+    }
+    // Fast path: during playback this fires on every position tick — keep the
+    // current highlight when it still covers the position instead of
+    // re-selecting and re-scrolling the table each time.
+    const int cur = m_table->currentRow();
+    if (cur >= 0 && cur < m_model->rowCount()) {
+        const auto &c = m_model->entryAt(cur);
+        if (posMs >= c.startMs && posMs <= c.endMs) return;
+    }
     for (int i = 0; i < m_model->rowCount(); ++i) {
         const auto &e = m_model->entryAt(i);
         if (posMs >= e.startMs && posMs <= e.endMs) {
+            m_highlightGate.restart();
             m_table->selectRow(i);
             m_table->scrollToItem(m_table->item(i, 0));
             return;
         }
     }
+    // 未命中任何字幕段時也更新 gate，避免空掃描風暴
+    m_highlightGate.restart();
 }
 
 void SubtitleEditor::onCellChanged(int row, int col) {
     if (m_updating || !m_model || row >= m_model->rowCount()) return;
     auto *item = m_table->item(row, col);
     if (!item) return;
-    m_updating = true;
     auto &e = m_model->entryAt(row);
-    if (col == 1)      e.startMs = displayToMs(item->text());
-    else if (col == 2) e.endMs   = displayToMs(item->text());
-    else if (col == 3) e.text    = item->text();
-    else if (col == 4) e.translation = item->text();
+    if (col == 1 || col == 2) {
+        const qint64 parsed = displayToMs(item->text());
+        const qint64 other = col == 1 ? e.endMs : e.startMs;
+        const bool valid = parsed >= 0 && (col == 1 ? parsed < other : parsed > other);
+        if (!valid) {
+            m_updating = true;
+            item->setText(col == 1 ? msToDisplay(e.startMs) : msToDisplay(e.endMs));
+            m_updating = false;
+            QMessageBox::warning(this, tr("Invalid timecode"),
+                tr("The start time must be before the end time, and the timecode must be valid."));
+            return;
+        }
+        m_updating = true;
+        if (col == 1) e.startMs = parsed;
+        else          e.endMs = parsed;
+    } else if (col == 3) {
+        m_updating = true;
+        const QString oldText = e.text;
+        e.text = item->text();
+        LearnedTerms::recordObservation(oldText, e.text);
+    } else if (col == 4) {
+        m_updating = true;
+        const QString oldText = e.translation;
+        e.translation = item->text();
+        LearnedTerms::recordObservation(oldText, e.translation);
+    }
     m_updating = false;
     emit m_model->entriesChanged();
 }
@@ -190,12 +284,21 @@ void SubtitleEditor::onAdd() {
 }
 
 void SubtitleEditor::onDelete() {
-    if (m_table->selectedItems().isEmpty() || !m_model) return;
-    int row = m_table->currentRow();
-    if (row < 0 || row >= m_model->rowCount()) return;
-    auto r = QMessageBox::question(this, tr("Delete"),
-        tr("Delete subtitle #%1?").arg(row+1), QMessageBox::Yes | QMessageBox::No);
-    if (r == QMessageBox::Yes) emit deleteRequested(row);
+    if (!m_model) return;
+    auto selRows = m_table->selectionModel()->selectedRows();
+    if (selRows.isEmpty()) return;
+    QList<int> rows;
+    for (const auto &idx : selRows) rows << idx.row();
+    std::sort(rows.begin(), rows.end(), std::greater<int>());
+    if (rows.size() == 1) {
+        auto r = QMessageBox::question(this, tr("Delete"),
+            tr("Delete subtitle #%1?").arg(rows.first()+1), QMessageBox::Yes | QMessageBox::No);
+        if (r == QMessageBox::Yes) emit deleteRequested(rows.first());
+    } else {
+        auto r = QMessageBox::question(this, tr("Delete"),
+            tr("Delete %1 selected subtitles?").arg(rows.size()), QMessageBox::Yes | QMessageBox::No);
+        if (r == QMessageBox::Yes) emit deleteRequested(rows);
+    }
 }
 
 void SubtitleEditor::onSplit() {
@@ -217,6 +320,13 @@ void SubtitleEditor::onMerge() {
     QList<int> rows;
     for (const auto &idx : selRows) rows << idx.row();
     std::sort(rows.begin(), rows.end());
+    for (int i = 1; i < rows.size(); ++i) {
+        if (rows[i] != rows[i - 1] + 1) {
+            QMessageBox::information(this, tr("Merge"),
+                tr("Select consecutive rows to merge."));
+            return;
+        }
+    }
     emit mergeRequested(rows.first(), rows.last());
 }
 
@@ -242,6 +352,14 @@ void SubtitleEditor::onShiftAll() {
         tr("Offset in milliseconds\n(positive = delay, negative = advance):"),
         0, -9999999, 9999999, 100, &ok);
     if (ok && offset != 0) m_model->shiftAll(qint64(offset));
+}
+
+void SubtitleEditor::onCorrect() {
+    if (!m_model || m_model->rowCount() == 0) {
+        QMessageBox::information(this, tr("Info"), tr("No subtitles to correct."));
+        return;
+    }
+    emit correctionRequested();
 }
 
 void SubtitleEditor::onSearch() {

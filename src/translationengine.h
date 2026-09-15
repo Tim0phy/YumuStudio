@@ -1,5 +1,6 @@
 #pragma once
 #include <QObject>
+#include <QPointer>
 #include <QList>
 #include <QString>
 #include "subtitlemodel.h"
@@ -39,7 +40,7 @@ signals:
     void finished(bool ok, const QString &error);
 
 private:
-    QThread            *m_thread = nullptr;
+    QPointer<QThread>   m_thread;
     TranslationWorker  *m_worker = nullptr;
     bool                m_busy   = false;
 };

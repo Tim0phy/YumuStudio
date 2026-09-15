@@ -1,0 +1,6 @@
+faster-whisper>=1.1.0
+funasr>=1.2.6
+sherpa-onnx>=1.13.0
+nvidia-cufft-cu12
+torch==2.11.0
+torchaudio==2.11.0
